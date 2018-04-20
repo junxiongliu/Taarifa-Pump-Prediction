@@ -3,3 +3,4 @@
 *.tar
 *.json
 *.ipynb_checkpoints
+*.csv
