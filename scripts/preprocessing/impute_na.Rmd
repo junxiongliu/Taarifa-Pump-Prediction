@@ -1,0 +1,62 @@
+---
+title: "impute"
+author: "Zili Li"
+date: "April 21, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse=TRUE, prompt=TRUE, eval=TRUE, message=F, include=T,comment=NULL,fig.width = 5, warnings = FALSE, fig.height = 3,tidy.opts=list(width.cutoff=50),tidy=TRUE, cache = TRUE)
+```
+
+```{r packageCheck, include=FALSE}
+mypacks <- c("ggplot2","stringr","dplyr","knitr","lubridate","car","readr","RPostgreSQL","rlang")  # what packages are needed?
+packs <- installed.packages()   # find installed package list
+install.me <- mypacks[!(mypacks %in% packs[,"Package"])]  #what needs to be installed?
+if (length(install.me) >= 1) install.packages(install.me, repos = "http://cran.us.r-project.org")   # install (if needed)
+lapply(mypacks, library, character.only=TRUE)  # load all packages
+
+```
+
+
+```{r}
+training_cleaned_v2 <- read_csv("training_cleaned_v2.csv")
+testing_cleaned_v2 <- read_csv("testing_cleaned_v2.csv")
+
+```
+
+```{r}
+library(mice)
+impute_train <- mice(training_cleaned_v2, m = 3, maxit = 3)
+impute_test <- mice(testing_cleaned_v2, m = 3, maxit = 3)
+
+```
+
+```{r}
+impute_age_train <- apply(impute_train$imp$age, 1, function(x) mean(x))
+impute_age_test <- apply(impute_test$imp$age, 1, function(x) mean(x))
+training_cleaned_v2[rownames(training_cleaned_v2) %in% names(impute_age_train),]$age <- impute_age_train
+testing_cleaned_v2[rownames(testing_cleaned_v2) %in% names(impute_age_test),]$age <- impute_age_test
+
+impute_meeting_train <- apply(impute_train$imp$public_meeting_new, 1, function(x) { tab <- table(x); names(tab)[which.max(tab)] } )
+impute_meeting_test <- apply(impute_test$imp$public_meeting_new, 1, function(x) { tab <- table(x); names(tab)[which.max(tab)] } )
+training_cleaned_v2[rownames(training_cleaned_v2) %in% names(impute_meeting_train),]$public_meeting_new <- impute_meeting_train
+testing_cleaned_v2[rownames(testing_cleaned_v2) %in% names(impute_meeting_test),]$public_meeting_new <- impute_meeting_test
+
+impute_permit_train <- apply(impute_train$imp$permit_new, 1, function(x) { tab <- table(x); names(tab)[which.max(tab)] } )
+impute_permit_test <- apply(impute_test$imp$permit_new, 1, function(x) { tab <- table(x); names(tab)[which.max(tab)] } )
+training_cleaned_v2[rownames(training_cleaned_v2) %in% names(impute_permit_train),]$permit_new <- impute_permit_train
+testing_cleaned_v2[rownames(testing_cleaned_v2) %in% names(impute_permit_test),]$permit_new <- impute_permit_test
+```
+
+# final check
+```{r}
+sum(is.na(training_cleaned_v2))
+sum(is.na(testing_cleaned_v2))
+```
+
+```{r}
+write.csv(training_cleaned_v2,"training_imputed.csv",row.names = F)
+write.csv(testing_cleaned_v2,"test_imputed.csv",row.names = F)
+```
+
