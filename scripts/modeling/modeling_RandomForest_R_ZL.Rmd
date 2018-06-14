@@ -1,0 +1,137 @@
+---
+title: "Random Forest"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse=TRUE, prompt=TRUE, eval=TRUE, message=F, include=T,comment=NULL,fig.width = 5, warning = FALSE, fig.height = 3,tidy.opts=list(width.cutoff=50),tidy=TRUE,cache = TRUE)
+```
+
+```{r packageCheck, include=FALSE}
+mypacks <- c("ggplot2","stringr","dplyr","knitr","lubridate","car","tidyr","cvTools","rpart","nnet","gbm","yaImpute","randomForest")  # what packages are needed?
+packs <- installed.packages()   # find installed package list
+install.me <- mypacks[!(mypacks %in% packs[,"Package"])]  #what needs to be installed?
+if (length(install.me) >= 1) install.packages(install.me, repos = "http://cran.us.r-project.org")   # install (if needed)
+lapply(mypacks, library, character.only=TRUE)  # load all packages
+```
+
+
+# Read data
+```{r}
+training_imputed <- read.csv("training_imputed.csv")
+test_imputed <- read.csv("test_imputed.csv")
+```
+
+```{r}
+sapply(training_imputed, class) 
+```
+
+
+```{r}
+train_df <- training_imputed %>%
+  select(-id, -year_recorded, -month_recorded, -day_recorded, -contains("encoded"))
+train_df[sapply(train_df, is.character)] <- lapply(train_df[sapply(train_df, is.character)], as.factor)
+sapply(train_df, class) 
+train_df$public_meeting_new <- as.factor(train_df$public_meeting_new)
+train_df$permit_new <- as.factor(train_df$permit_new)
+```
+
+## omit NAs
+```{r}
+sum(is.na(train_df))
+train_df[is.na(train_df),]
+train_df2 <- na.omit(train_df)
+```
+
+
+## Random Forest
+```{r}
+library(randomForest)
+rf1 <- randomForest(status_group~., data=train_df2, mtry=3, ntree = 500, nodesize = 3, importance = TRUE)
+plot(rf1)
+rf1
+```
+
+
+## Junxiong's code
+
+# A function to determine cv in partition
+```{r}
+CVInd <- function(n,K) { #n is sample size; K is number of parts; returns   K-length list of indices for each part
+  m<-floor(n/K) #approximate size of each part
+  r<-n-m*K
+  I<-sample(n,n) #random reordering of the indices
+  Ind<-list() #will be list of indices for all K parts
+  length(Ind)<-K
+  for (k in 1:K) {
+    if (k <= r) kpart <- ((m+1)*(k-1)+1):((m+1)*k)
+    else kpart<-((m+1)*r+m*(k-r-1)+1):((m+1)*r+m*(k-r))
+    Ind[[k]] <- I[kpart] #indices for kth part of data
+  }
+Ind
+}
+```
+
+# find the best random Forest model
+```{r}
+## try out different mtrys and node sizes (with ntree=50)
+## mtrys <- c(1,3,5,7,9)
+## nsizes <- c(1,3,5,7,9)
+
+mtrys <- 5
+nsizes <- 5
+
+cur_best_mtry <- -1
+cur_best_nsize <- -1
+cur_best_ccr <- -99999
+
+for (nsize in nsizes){
+  for (mt in mtrys){
+    set.seed(1)
+    rForest_1 <- randomForest(status_group~amount_tsh+year_recorded+month_recorded+
+                              day_recorded+gps_height+basin_encoded+region_encoded+
+                              population+public_meeting_new+permit_new+age+
+                              extraction_type_encoded+extraction_type_group_encoded+
+                              extraction_type_class_encoded+management_encoded+
+                              management_group_new_encoded+payment_encoded+
+                              quantity_group_encoded+quality_group_new_encoded+
+                              source_encoded+source_type_encoded+source_class_encoded+
+                              waterpoint_type_new_encoded, 
+                            data=train[1:25000,], mtry=mt, 
+                            ntree = 50,nodesize = nsize, 
+                            importance = TRUE, proximity = TRUE) 
+    rForest_2 <- randomForest(status_group~amount_tsh+year_recorded+month_recorded+
+                              day_recorded+gps_height+basin_encoded+region_encoded+
+                              population+public_meeting_new+permit_new+age+
+                              extraction_type_encoded+extraction_type_group_encoded+
+                              extraction_type_class_encoded+management_encoded+
+                              management_group_new_encoded+payment_encoded+
+                              quantity_group_encoded+quality_group_new_encoded+
+                              source_encoded+source_type_encoded+source_class_encoded+
+                              waterpoint_type_new_encoded, 
+                            data=train[25001:59400,], mtry=mt, 
+                            ntree = 50,nodesize = nsize, 
+                            importance = TRUE, proximity = TRUE) 
+    rForest_c <- combine(rForest_1,rForest_2)
+    
+    oob_ccr <- sum(diag(rForest_c$confusion))/sum(rForest_c$confusion)
+    if (oob_ccr > cur_best_ccr){
+      cur_best_mtry <- mt
+      cur_best_nsize <- nsize
+      cur_best_mse <- oob_ccr
+    }
+  }
+}
+
+# best parameters
+rf_best_mtry <- cur_best_mtry
+rf_best_mtry
+rf_best_nsize <- nsize
+rf_best_nsize
+
+# best result
+rf_best_ccr <- oob_ccr
+rf_best_ccr
+```
