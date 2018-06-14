@@ -1,0 +1,91 @@
+---
+title: "modeling_gbm_R"
+author: "Junxiong Liu"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse=TRUE, prompt=TRUE, eval=TRUE, message=F, include=T,comment=NULL,fig.width = 5, warning = FALSE, fig.height = 3,tidy.opts=list(width.cutoff=50),tidy=TRUE,cache = TRUE)
+```
+
+```{r packageCheck, include=FALSE}
+mypacks <- c("ggplot2","stringr","dplyr","knitr","lubridate","car","tidyr","cvTools","gbm")  # what packages are needed?
+packs <- installed.packages()   # find installed package list
+install.me <- mypacks[!(mypacks %in% packs[,"Package"])]  #what needs to be installed?
+if (length(install.me) >= 1) install.packages(install.me, repos = "http://cran.us.r-project.org")   # install (if needed)
+lapply(mypacks, library, character.only=TRUE)  # load all packages
+```
+
+# Read data
+```{r}
+train <- read.csv("../../data/cleaned/training_imputed_r_mice_v1.csv")
+test <- read.csv("../../data/cleaned/test_imputed_r_mice_v1.csv")
+```
+
+# Manipulate variables
+```{r}
+train_df <- train %>%
+  select(-id, -contains("encoded"))
+
+train_df[sapply(train_df, is.character)] <- lapply(train_df[sapply(train_df, is.character)], as.factor)
+
+sapply(train_df, class) 
+train_df$public_meeting_new <- as.factor(train_df$public_meeting_new)
+train_df$permit_new <- as.factor(train_df$permit_new)
+
+test_df <- test %>%
+  select(-id, -contains("encoded"))
+
+test_df[sapply(test_df, is.character)] <- lapply(test_df[sapply(test_df, is.character)], as.factor)
+
+sapply(test_df, class) 
+test_df$public_meeting_new <- as.factor(test_df$public_meeting_new)
+test_df$permit_new <- as.factor(test_df$permit_new)
+
+# use common levels for rf
+common <- intersect(names(train_df), names(test_df)) 
+for (p in common) { 
+  if (class(train_df[[p]]) == "factor") { 
+    levels(test_df[[p]]) <- levels(train_df[[p]]) 
+  } 
+}
+```
+
+# gbm main
+```{r gbm_main}
+Sys.time()
+
+set.seed(1)
+# var.monotone = rep(0,# of variables)
+boosted_tree <- gbm(status_group~., data=train_df, var.monotone=rep(0,23),
+                    distribution="multinomial",n.trees=5000, shrinkage=0.07,
+                    interaction.depth=3,bag.fraction = .5, train.fraction = 1,
+                    n.minobsinnode = 10, cv.folds = 7, keep.data=TRUE,
+                    verbose=FALSE)
+
+# find best iteration
+best.iter_bt <- gbm.perf(boosted_tree,method="cv")
+best.iter_bt
+
+set.seed(1)
+bt_best <- gbm(status_group~., data=train_df, var.monotone=rep(0,23),
+                    distribution="multinomial",n.trees=best.iter_bt, shrinkage=0.07,
+                    interaction.depth=3,bag.fraction = .5, train.fraction = 1,
+                    n.minobsinnode = 10, cv.folds = 7, keep.data=TRUE,
+                    verbose=FALSE)
+
+Sys.time()
+```
+
+# predict
+```{r}
+predictions <- predict(bt_best, test_df, type = "response")
+
+output <- test %>% 
+  mutate(status_group_code = apply(predictions, 1, which.max)) %>%
+  mutate(status_group = ifelse(status_group_code == 1, "functional", ifelse(status_group_code == 2, "functional needs repair", "non functional"))) %>%
+  select(id, status_group)
+
+write.csv(output,"../../data/submissions/out_r_v5.csv",row.names=FALSE)
+```
+
